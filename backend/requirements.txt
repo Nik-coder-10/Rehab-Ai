@@ -1,0 +1,16 @@
+# Core API stack (Stage 0)
+fastapi>=0.115
+uvicorn>=0.30
+websockets>=13
+pydantic>=2.9
+pydantic-settings>=2.5
+email-validator>=2.2
+
+# Database (PostgreSQL via psycopg3, SQLAlchemy 2.x, Alembic migrations)
+sqlalchemy>=2.0.35
+alembic>=1.13
+psycopg[binary]>=3.2
+
+# Auth
+pyjwt>=2.9
+bcrypt>=4.0

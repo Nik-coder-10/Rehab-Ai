@@ -1,0 +1,7 @@
+# Computer-vision stack - installed in Stage 3 (exercise engine implementation).
+# NOTE: mediapipe wheels lag behind newest Python versions. If installation
+# fails on the local Python, use a Python 3.11/3.12 virtualenv or the provided
+# Docker image for CV work.
+mediapipe>=0.10
+opencv-python>=4.10
+numpy>=1.26
