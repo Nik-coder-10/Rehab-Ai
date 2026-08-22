@@ -3,18 +3,16 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   ArrowLeft,
-  Camera,
   CheckCircle2,
   ChevronRight,
-  Eye,
   Pause,
   Play,
-  ShieldCheck,
   Sparkles,
   StopCircle,
 } from 'lucide-react';
 import { api } from '../services/api';
 import type { Exercise, ExerciseSession } from '../types';
+import { PoseDetector } from '../components/exercise/PoseDetector';
 
 export const ExerciseSessionPage: React.FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>();
@@ -268,105 +266,36 @@ export const ExerciseSessionPage: React.FC = () => {
 
       {/* Main Studio Viewport: Camera / Overlay Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '1.5rem' }} className="session-grid">
-        {/* Left: Camera Feed & Pose Overlay Area */}
-        <div
-          className="glass-panel"
-          style={{
-            position: 'relative',
-            minHeight: '480px',
-            borderRadius: 'var(--radius-lg)',
-            overflow: 'hidden',
-            backgroundColor: '#070b14',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px solid rgba(20, 184, 166, 0.3)',
-          }}
-        >
-          {/* CAMERA FEED PLACEHOLDER (Will bind to webcam / MediaPipe video) */}
-          <div
-            id="CameraFeed"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'radial-gradient(circle at center, #111a2e 0%, #060a12 100%)',
-              color: 'var(--text-secondary)',
-              textAlign: 'center',
-              padding: '2rem',
+        {/* Left: Real Camera Feed & Pose Overlay Area */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <PoseDetector
+            onPoseFrame={(frame) => {
+              if (frame.landmarks.length > 0) {
+                // If person is detected and tracking
+                if (frame.quality === 'READY') {
+                  setFeedbackMessage('Optimal form detected. Ready to track repetitions.');
+                } else if (frame.quality === 'PARTIAL_BODY') {
+                  setFeedbackMessage('Step back 2 meters so your full body & joints are visible.');
+                } else if (frame.quality === 'POOR_VISIBILITY') {
+                  setFeedbackMessage('Lighting is low. Please ensure clear joint illumination.');
+                }
+              } else {
+                setFeedbackMessage('Position yourself in front of the camera.');
+              }
             }}
-          >
-            <div
-              style={{
-                width: '72px',
-                height: '72px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px dashed rgba(20, 184, 166, 0.4)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1rem',
-              }}
-            >
-              <Camera size={32} color="var(--primary-light)" />
-            </div>
-            <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff' }}>Camera & Pose Tracking Area</h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '400px', marginTop: '0.4rem' }}>
-              MediaPipe Computer Vision pipeline hook ready. Place device 2 meters away with full body visible.
-            </p>
+            showSkeleton={true}
+            showAngles={true}
+          />
 
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(20, 184, 166, 0.08)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(20, 184, 166, 0.2)' }}>
+            <span style={{ fontSize: '0.85rem', color: '#ffffff' }}>{feedbackMessage}</span>
             <button
               onClick={handleSimulateRep}
               className="btn btn-secondary"
-              style={{ marginTop: '1.5rem', background: 'rgba(20, 184, 166, 0.15)', borderColor: 'var(--border-glow)' }}
+              style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
             >
-              <Sparkles size={16} color="var(--primary-light)" />
-              Simulate Repetition ({currentReps}/{targetReps})
+              <Sparkles size={13} color="var(--primary-light)" /> Simulate Rep ({currentReps}/{targetReps})
             </button>
-          </div>
-
-          {/* POSE OVERLAY HOOK */}
-          <div
-            id="PoseOverlay"
-            style={{
-              position: 'absolute',
-              top: '1rem',
-              left: '1rem',
-              zIndex: 10,
-            }}
-          >
-            <span className="badge badge-teal">
-              <Eye size={12} /> Landmark Detection Ready
-            </span>
-          </div>
-
-          {/* Real-time Form Feedback Banner at bottom of viewport */}
-          <div
-            id="FormFeedback"
-            style={{
-              position: 'absolute',
-              bottom: '1rem',
-              left: '1rem',
-              right: '1rem',
-              padding: '0.85rem 1.25rem',
-              backgroundColor: 'rgba(15, 23, 42, 0.85)',
-              backdropFilter: 'blur(8px)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              zIndex: 10,
-            }}
-          >
-            <ShieldCheck size={20} color="var(--primary-light)" />
-            <span style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 500 }}>
-              {feedbackMessage}
-            </span>
           </div>
         </div>
 

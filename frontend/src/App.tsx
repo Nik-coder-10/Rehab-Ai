@@ -27,6 +27,9 @@ import { DoctorSessionsPage } from './pages/doctor/DoctorSessionsPage';
 import { DoctorAnalyticsPage } from './pages/doctor/DoctorAnalyticsPage';
 import { DoctorProfilePage } from './pages/doctor/DoctorProfilePage';
 
+// Dev / Testing Routes
+import { DevPoseTestPage } from './pages/dev/DevPoseTestPage';
+
 export function App() {
   return (
     <AuthProvider>
@@ -60,6 +63,9 @@ export function App() {
               <Route path="profile" element={<DoctorProfilePage />} />
             </Route>
           </Route>
+
+          {/* Dev Pose Estimation Testing Route */}
+          <Route path="/dev/pose-test" element={<DevPoseTestPage />} />
 
           {/* Default Root Redirect */}
           <Route path="/" element={<Navigate to="/login" replace />} />
