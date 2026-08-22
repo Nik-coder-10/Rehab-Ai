@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    String,
     Uuid,
     func,
 )
