@@ -275,7 +275,12 @@ def list_patient_sessions(
 def get_patient_progress_summary(
     db: Session, patient_profile_id: uuid.UUID
 ) -> ProgressSummaryRead:
-    sessions = list_patient_sessions(db, patient_profile_id, limit=30)
+    from app.services.recovery_engine import (
+        HistoricalSessionSnapshot,
+        calculate_recovery_score,
+    )
+
+    sessions = list_patient_sessions(db, patient_profile_id, limit=50)
     completed_sessions = [s for s in sessions if s.status == SessionStatus.completed]
     total_completed = len(completed_sessions)
 
@@ -286,8 +291,22 @@ def get_patient_progress_summary(
     scores = [s.average_form_score for s in completed_sessions if s.average_form_score is not None]
     avg_score = round(sum(scores) / len(scores), 1) if scores else None
 
-    # Calculate Adherence based on active plan target vs completed in last 7 days
-    adherence = 85.0 if total_completed > 0 else 0.0
+    # Construct snapshots for recovery engine
+    snapshots = [
+        HistoricalSessionSnapshot(
+            session_id=str(s.id),
+            exercise_id=str(s.exercise_id),
+            exercise_name=s.exercise.name if s.exercise else "Exercise",
+            performed_at=s.started_at,
+            completed_reps=s.metrics_count or 10,
+            target_reps=10,
+            average_form_score=s.average_form_score,
+            max_rom_deg=s.max_rom,
+        )
+        for s in completed_sessions
+    ]
+
+    recovery_res = calculate_recovery_score(snapshots)
 
     # Fetch longitudinal progress records
     progress_records = db.scalars(
@@ -307,22 +326,27 @@ def get_patient_progress_summary(
         for r in progress_records
     ]
 
-    # Weekly frequency placeholder buckets
+    # Weekly frequency calculated from actual sessions in past 7 days
+    now = datetime.now(timezone.utc)
+    days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    day_counts = {d: 0 for d in days_map}
+    for s in completed_sessions:
+        if s.started_at:
+            s_time = s.started_at if s.started_at.tzinfo is not None else s.started_at.replace(tzinfo=timezone.utc)
+            if (now - s_time).days < 7:
+                day_name = days_map[s_time.weekday()]
+                day_counts[day_name] += 1
+
     weekly_frequency = [
-        {"day": "Mon", "sessions": 1, "target": 1},
-        {"day": "Tue", "sessions": 1, "target": 1},
-        {"day": "Wed", "sessions": 0, "target": 1},
-        {"day": "Thu", "sessions": 1, "target": 1},
-        {"day": "Fri", "sessions": 1, "target": 1},
-        {"day": "Sat", "sessions": 0, "target": 0},
-        {"day": "Sun", "sessions": 0, "target": 0},
+        {"day": d, "sessions": day_counts[d], "target": 1 if d not in ["Sat", "Sun"] else 0}
+        for d in days_map
     ]
 
     return ProgressSummaryRead(
         total_sessions_completed=total_completed,
         total_exercises_completed=unique_exercises,
-        adherence_percentage=adherence,
-        recovery_score_placeholder="Form & ROM Stability Index: 82/100 (Clinical Recovery Tracking)",
+        adherence_percentage=float(recovery_res.adherence_percentage),
+        recovery_score_placeholder=f"Recovery Score: {recovery_res.recovery_score}/100 ({recovery_res.confidence.value} Confidence, Trend: {recovery_res.trend.value})",
         average_form_score=avg_score,
         rom_progress_records=rom_records,
         weekly_frequency=weekly_frequency,
