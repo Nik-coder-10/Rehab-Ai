@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowLeft,
+  Camera,
   Pause,
   Play,
   ShieldCheck,
@@ -15,6 +17,7 @@ import type { PoseDetectionFrame } from '../cv/landmarks';
 import { exerciseRegistry } from '../cv/exercises/registry';
 import type { IExerciseAnalyzer, ExerciseAnalysisResult } from '../cv/exercises/core/types';
 import { ExerciseSessionWsClient, type WsConnectionStatus } from '../services/sessionWsClient';
+import { PoseCalibrationEngine, type CalibrationResult } from '../cv/calibration';
 
 export const ExerciseSessionPage: React.FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>();
@@ -28,6 +31,17 @@ export const ExerciseSessionPage: React.FC = () => {
   const [savingSession, setSavingSession] = useState<boolean>(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionStatus>('CONNECTING');
 
+  // Calibration Engine
+  const calibrationEngineRef = useRef<PoseCalibrationEngine>(new PoseCalibrationEngine('squat'));
+  const [calibrationState, setCalibrationState] = useState<CalibrationResult>({
+    status: 'CAMERA_CHECK',
+    progressPercent: 0,
+    feedbackCue: 'Initializing camera check and biometric detectors...',
+    isReady: false,
+    baselineAngles: {},
+    confidence: 0,
+  });
+
   // Dynamic Biomechanical Analyzer Instance
   const analyzerRef = useRef<IExerciseAnalyzer>(exerciseRegistry.get('squat'));
   const wsClientRef = useRef<ExerciseSessionWsClient | null>(null);
@@ -40,7 +54,7 @@ export const ExerciseSessionPage: React.FC = () => {
   const [peakRom, setPeakRom] = useState<number>(0);
   const [currentPhase, setCurrentPhase] = useState<string>('STARTING');
   const [feedbackMessage, setFeedbackMessage] = useState<string>(
-    'Stand 2 meters in front of the camera with your target joint in view.'
+    'Stand in full view of the camera to begin posture calibration.'
   );
 
   useEffect(() => {
@@ -51,9 +65,10 @@ export const ExerciseSessionPage: React.FC = () => {
         const ex = await api.getExerciseDetail(exerciseId);
         setExercise(ex);
 
-        // Dynamically instantiate the correct exercise analyzer from the registry
+        // Dynamically instantiate the correct exercise analyzer and calibration rules
         const analyzerInstance = exerciseRegistry.get(ex.code || ex.name);
         analyzerRef.current = analyzerInstance;
+        calibrationEngineRef.current = new PoseCalibrationEngine(ex.code || ex.name);
 
         // Fetch prescription from patient plan if available
         try {
@@ -71,7 +86,6 @@ export const ExerciseSessionPage: React.FC = () => {
         // Initialize session on backend
         const sess = await api.createSession(exerciseId);
         setSession(sess);
-        setSessionActive(true);
 
         // Establish WebSocket telemetry channel
         const token = localStorage.getItem('token') || '';
@@ -98,18 +112,35 @@ export const ExerciseSessionPage: React.FC = () => {
   // Session elapsed timer
   useEffect(() => {
     let interval: any;
-    if (sessionActive) {
+    if (sessionActive && calibrationState.isReady) {
       interval = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [sessionActive]);
+  }, [sessionActive, calibrationState.isReady]);
 
-  // Handle live pose estimation frame & feed to active dynamic analyzer + WebSocket
+  // Handle live pose estimation frame & feed through Calibration -> Analyzer -> WebSocket
   const handlePoseFrame = (frame: PoseDetectionFrame) => {
-    if (!sessionActive || frame.landmarks.length === 0) return;
+    // 1. Run Calibration Engine Check
+    const calib = calibrationEngineRef.current.processFrame(
+      frame.landmarks,
+      analysisResult?.currentAngle
+    );
+    setCalibrationState(calib);
 
+    // If still in setup or occluded, update status message and pause analysis
+    if (!calib.isReady) {
+      setFeedbackMessage(calib.feedbackCue);
+      return;
+    }
+
+    // Auto-activate session once calibration succeeds
+    if (!sessionActive) {
+      setSessionActive(true);
+    }
+
+    // 2. Feed into Active Biomechanical Exercise Analyzer
     const analysis = analyzerRef.current.processFrame(frame.landmarks, frame.timestamp);
     setAnalysisResult(analysis);
     setCurrentPhase(analysis.phase);
@@ -201,38 +232,6 @@ export const ExerciseSessionPage: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getPhaseBadge = (phase: string) => {
-    switch (phase.toUpperCase()) {
-      case 'STARTING':
-      case 'STANDING':
-      case 'SUPINE':
-      case 'FLEXED':
-      case 'EXTENSION':
-      case 'ADDUCTION':
-      case 'NEUTRAL':
-        return <span className="badge badge-teal">{phase}</span>;
-      case 'DESCENDING':
-      case 'FLEXING':
-      case 'ABDUCTING':
-      case 'FLEXING_FORWARD':
-      case 'EXTENDING':
-      case 'RAISING':
-        return <span className="badge badge-blue">{phase}</span>;
-      case 'BOTTOM':
-      case 'PEAK_CONTRACTION':
-      case 'PEAK_ELEVATION':
-      case 'OVERHEAD_PEAK':
-      case 'TERMINAL_EXTENSION':
-        return <span className="badge badge-green">PEAK ROM</span>;
-      case 'ASCENDING':
-      case 'LOWERING':
-      case 'ADDUCTING':
-        return <span className="badge badge-amber">{phase}</span>;
-      default:
-        return <span className="badge badge-teal">{phase}</span>;
-    }
-  };
-
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -260,7 +259,9 @@ export const ExerciseSessionPage: React.FC = () => {
             </h2>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.2rem' }}>
               <span className="badge badge-teal">{exercise?.category}</span>
-              {getPhaseBadge(currentPhase)}
+              <span className={calibrationState.isReady ? 'badge badge-green' : 'badge badge-amber'}>
+                {calibrationState.isReady ? currentPhase : calibrationState.status.replace('_', ' ')}
+              </span>
             </div>
           </div>
         </div>
@@ -312,6 +313,7 @@ export const ExerciseSessionPage: React.FC = () => {
 
           <button
             onClick={handleTogglePause}
+            disabled={!calibrationState.isReady}
             className="btn btn-secondary"
             style={{ padding: '0.55rem 0.9rem' }}
           >
@@ -329,7 +331,7 @@ export const ExerciseSessionPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Studio Viewport: Camera / Squat Overlay Grid */}
+      {/* Main Studio Viewport: Camera / Calibration Progress Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '1.5rem' }} className="session-grid">
         {/* Left: Real Camera Feed & Pose Overlay Area */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -339,22 +341,26 @@ export const ExerciseSessionPage: React.FC = () => {
             showAngles={true}
           />
 
-          {/* Form Feedback & Coaching Banner */}
+          {/* Form Feedback & Calibration Cueing Banner */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              backgroundColor: 'rgba(20, 184, 166, 0.08)',
+              backgroundColor: calibrationState.isReady ? 'rgba(20, 184, 166, 0.08)' : 'rgba(245, 158, 11, 0.08)',
               padding: '0.85rem 1.25rem',
               borderRadius: 'var(--radius-md)',
-              border: '1px solid rgba(20, 184, 166, 0.2)',
+              border: calibrationState.isReady ? '1px solid rgba(20, 184, 166, 0.2)' : '1px solid rgba(245, 158, 11, 0.3)',
               flexWrap: 'wrap',
               gap: '0.75rem',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ShieldCheck size={18} color="var(--primary-light)" />
+              {calibrationState.isReady ? (
+                <ShieldCheck size={18} color="var(--primary-light)" />
+              ) : (
+                <AlertTriangle size={18} color="#fbbf24" />
+              )}
               <span style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 500 }}>
                 {feedbackMessage}
               </span>
@@ -370,8 +376,39 @@ export const ExerciseSessionPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Rep Counter & Session Live Metrics Panel */}
+        {/* Right: Rep Counter & Calibration Health Dashboard */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Calibration Status Card if Not Ready */}
+          {!calibrationState.isReady && (
+            <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <Camera size={18} color="#fbbf24" />
+                <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>Camera & Posture Check</h4>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: '0.75rem' }}>
+                {calibrationState.feedbackCue}
+              </p>
+              <div
+                style={{
+                  width: '100%',
+                  height: '8px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${calibrationState.progressPercent}%`,
+                    height: '100%',
+                    backgroundColor: '#fbbf24',
+                    transition: 'width 0.2s ease',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Reps Goal Tile */}
           <div
             className="glass-panel"
