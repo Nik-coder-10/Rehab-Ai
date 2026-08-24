@@ -136,3 +136,50 @@ def finish_session(
         created_at=session.created_at,
         exercise=ExerciseRead.model_validate(session.exercise) if session.exercise else None,
     )
+
+
+@router.get("/sessions/{session_id}/score")
+def get_session_score(
+    session_id: uuid.UUID,
+    patient_auth: Annotated[tuple[User, PatientProfile], Depends(get_current_patient)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Evaluate deterministic multidimensional rehabilitation score for a session."""
+    from app.services.scoring_engine import (
+        SessionScoringInput,
+        RawRepMetrics,
+        calculate_deterministic_session_score,
+    )
+
+    _, profile = patient_auth
+    session = get_session_detail(db, profile.id, session_id)
+
+    rep_metrics = [
+        RawRepMetrics(
+            rep_number=m.rep_index,
+            form_score=m.form_score or 100.0,
+            peak_rom_deg=m.rom_max_deg or 0.0,
+            duration_seconds=2.5,
+            velocity_deg_per_sec=80.0,
+            is_valid=m.valid,
+            issues=m.form_issues if isinstance(m.form_issues, list) else [],
+        )
+        for m in session.metrics
+    ]
+
+    target_reps = 10
+    target_rom = 85.0
+    if session.plan_exercise:
+        target_reps = session.plan_exercise.target_reps or 10
+        target_rom = session.plan_exercise.target_rom_degrees or 85.0
+
+    scoring_input = SessionScoringInput(
+        exercise_code=session.exercise.code if session.exercise else "generic",
+        target_reps=target_reps,
+        target_rom_deg=target_rom,
+        rep_metrics=rep_metrics,
+        average_visibility=0.95,
+    )
+
+    breakdown = calculate_deterministic_session_score(scoring_input)
+    return breakdown.model_dump()
