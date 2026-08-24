@@ -27,6 +27,7 @@ export const DoctorLayout: React.FC = () => {
 
   const navLinks = [
     { to: '/doctor', label: 'Clinical Overview', icon: LayoutDashboard, end: true },
+    { to: '/doctor/intelligence', label: 'Intelligence Center', icon: Activity },
     { to: '/doctor/patients', label: 'Patient Directory', icon: Users },
     { to: '/doctor/exercises', label: 'Exercise Library', icon: Dumbbell },
     { to: '/doctor/sessions', label: 'Session Logs', icon: History },

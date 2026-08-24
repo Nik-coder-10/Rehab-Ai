@@ -270,4 +270,27 @@ export const api = {
     });
     return handleResponse<Exercise>(res);
   },
+
+  getDoctorIntelligence: async (): Promise<any> => {
+    const res = await fetch(`${API_BASE}/doctor/intelligence`, {
+      headers: getHeaders(),
+    });
+    return handleResponse<any>(res);
+  },
+
+  getDoctorRecommendations: async (): Promise<any[]> => {
+    const res = await fetch(`${API_BASE}/doctor/recommendations`, {
+      headers: getHeaders(),
+    });
+    return handleResponse<any[]>(res);
+  },
+
+  submitRecommendationDecision: async (recommendationId: string, decision: 'APPROVED' | 'REJECTED', doctorNote?: string): Promise<any> => {
+    const res = await fetch(`${API_BASE}/doctor/recommendations/${recommendationId}/decision`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ decision, doctor_note: doctorNote }),
+    });
+    return handleResponse<any>(res);
+  },
 };

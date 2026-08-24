@@ -27,6 +27,8 @@ import { DoctorSessionsPage } from './pages/doctor/DoctorSessionsPage';
 import { DoctorAnalyticsPage } from './pages/doctor/DoctorAnalyticsPage';
 import { DoctorProfilePage } from './pages/doctor/DoctorProfilePage';
 
+import { DoctorIntelligencePage } from './pages/doctor/DoctorIntelligencePage';
+
 // Dev / Testing Routes
 import { DevPoseTestPage } from './pages/dev/DevPoseTestPage';
 
@@ -54,6 +56,7 @@ export function App() {
           <Route element={<ProtectedRoute allowedRole="doctor" />}>
             <Route path="/doctor" element={<DoctorLayout />}>
               <Route index element={<DoctorDashboard />} />
+              <Route path="intelligence" element={<DoctorIntelligencePage />} />
               <Route path="patients" element={<DoctorPatientsPage />} />
               <Route path="patients/:patientId" element={<DoctorPatientDetailPage />} />
               <Route path="patients/:patientId/plan" element={<DoctorPlanManagementPage />} />

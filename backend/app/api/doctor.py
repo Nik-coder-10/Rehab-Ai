@@ -65,7 +65,18 @@ def update_profile(
     return update_doctor_profile(db, profile, data)
 
 
-# --- Doctor Dashboard & Analytics ---
+# --- Doctor Dashboard & Intelligence Center ---
+@router.get("/intelligence")
+def get_intelligence(
+    doctor_auth: Annotated[tuple[User, DoctorProfile], Depends(get_current_doctor)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.services.doctor_intelligence import get_doctor_clinical_intelligence
+    _, profile = doctor_auth
+    intelligence = get_doctor_clinical_intelligence(db, profile.id)
+    return intelligence.model_dump()
+
+
 @router.get("/dashboard", response_model=DoctorDashboardSummary)
 def get_dashboard(
     doctor_auth: Annotated[tuple[User, DoctorProfile], Depends(get_current_doctor)],
