@@ -84,21 +84,52 @@ def get_progress(
     return get_patient_progress_summary(db, profile.id)
 
 
-@router.get("/recommendations")
-def get_patient_recommendations(
+@router.post("/ai/ask")
+def ask_ai_assistant(
+    data: dict,  # {"question": str}
     patient_auth: Annotated[tuple[User, PatientProfile], Depends(get_current_patient)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Evaluate or retrieve current adaptive clinical recommendation for patient."""
-    from app.services.recommendation_service import evaluate_and_generate_patient_recommendation
-    _, profile = patient_auth
-    rec = evaluate_and_generate_patient_recommendation(db, profile.id)
-    return {
-        "id": str(rec.id),
-        "recommendation_type": rec.recommendation_type.value,
-        "status": rec.status.value,
-        "title": rec.title,
-        "patient_message": rec.patient_message,
-        "confidence_score": rec.confidence_score,
-        "created_at": rec.created_at.isoformat() if rec.created_at else None,
-    }
+    """Ask the RehabAI Assistant questions regarding progress and technique."""
+    from app.services.ai_assistant import RehabilitationAIService, StructuredRehabContext
+    from app.services.patient_service import get_patient_progress_summary
+
+    user, profile = patient_auth
+    progress = get_patient_progress_summary(db, profile.id)
+
+    context = StructuredRehabContext(
+        patient_id=str(profile.id),
+        patient_name=user.full_name,
+        total_sessions_completed=progress.total_sessions_completed,
+        adherence_percentage=int(progress.adherence_percentage),
+        recent_form_score=progress.average_form_score,
+    )
+
+    ai_service = RehabilitationAIService()
+    response = ai_service.answer_patient_question(context, data.get("question", "How is my progress?"))
+    return response.model_dump()
+
+
+@router.get("/ai/summary")
+def get_ai_progress_summary(
+    patient_auth: Annotated[tuple[User, PatientProfile], Depends(get_current_patient)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Generate structured AI coaching summary from verified metrics."""
+    from app.services.ai_assistant import RehabilitationAIService, StructuredRehabContext
+    from app.services.patient_service import get_patient_progress_summary
+
+    user, profile = patient_auth
+    progress = get_patient_progress_summary(db, profile.id)
+
+    context = StructuredRehabContext(
+        patient_id=str(profile.id),
+        patient_name=user.full_name,
+        total_sessions_completed=progress.total_sessions_completed,
+        adherence_percentage=int(progress.adherence_percentage),
+        recent_form_score=progress.average_form_score,
+    )
+
+    ai_service = RehabilitationAIService()
+    response = ai_service.generate_session_summary(context)
+    return response.model_dump()
