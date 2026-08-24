@@ -1,156 +1,119 @@
-# 🏥 RehabAI - AI-Assisted Physical Therapy & Rehabilitation Platform
+# RehabAI - AI-Assisted Physical Therapy & Motor Rehabilitation Platform
 
-> **SIH Hackathon Prototype**  
-> *AI-powered posture analysis, real-time exercise feedback, remote patient monitoring, and personalized rehabilitation plans.*
-
----
-
-## 📌 Overview
-
-**RehabAI** is an intelligent digital health platform designed to transform physiotherapy and motor rehabilitation. By combining real-time computer vision posture analysis with clinical workflow management, RehabAI enables doctors to prescribe personalized rehabilitation plans and empowers patients to perform exercises accurately with real-time feedback.
-
-> ⚠️ **Disclaimer**: *This software is a prototype developed for Smart India Hackathon (SIH). It is intended for demonstration purposes only and is not a certified medical device.*
+RehabAI is an intelligent, real-time motor rehabilitation platform engineered for Smart India Hackathon (SIH). It features client-side MediaPipe pose detection, real-time WebSocket exercise telemetry, deterministic biomechanical scoring, longitudinal Recovery Score algorithms, doctor clinical intelligence triage, and safety-prompted AI coaching.
 
 ---
 
-## 🛠️ Architecture & Tech Stack
-
-### Backend Stack
-- **Framework**: [FastAPI](https://fastapi.tiangolo.com/) `v0.115+` (Async API & Sync DB Session Handling)
-- **Database ORM**: [SQLAlchemy](https://www.sqlalchemy.org/) `2.0+` (Type-annotated Declarative Mapping)
-- **Database Driver**: [psycopg3](https://www.psycopg.org/psycopg3/) `3.2+` (PostgreSQL integration)
-- **Database Migrations**: [Alembic](https://alembic.sqlalchemy.org/) `1.13+`
-- **Data Validation & Settings**: [Pydantic v2](https://docs.pydantic.dev/) & `pydantic-settings`
-- **Authentication**: JWT (`PyJWT`) & Password Hashing (`bcrypt`)
-
-### Computer Vision (CV) Engine Stack
-- **Pose Detection & Tracking**: [MediaPipe](https://mediapipe.dev/) `0.10+`
-- **Image & Video Processing**: [OpenCV](https://opencv.org/) `4.10+`
-- **Numerical Processing**: [NumPy](https://numpy.org/) `1.26+`
-
----
-
-## 📁 Repository Structure
+## 🏗️ System Architecture
 
 ```
-SIH/
-├── README.md
-├── .gitignore
-└── backend/
-    ├── alembic/              # Database migration scripts & environment
-    ├── app/
-    │   ├── api/              # API endpoints and routers (v1)
-    │   ├── core/             # Configuration, logging, security & exceptions
-    │   │   ├── config.py     # Settings loaded from environment / .env
-    │   │   ├── exceptions.py # Custom HTTP domain exceptions
-    │   │   ├── logging.py    # Structured logging configuration
-    │   │   └── security.py   # JWT generation & bcrypt hashing helpers
-    │   ├── db/               # Database engine, session setup & base class
-    │   │   ├── base.py       # Import registry for Alembic metadata
-    │   │   ├── base_class.py # Declarative Base model
-    │   │   └── session.py    # Scoped DB sessions & FastAPI dependency
-    │   ├── models/           # SQLAlchemy ORM Data Models
-    │   │   ├── user.py       # User & UserRole models (Patient / Doctor / Admin)
-    │   │   ├── doctor.py     # DoctorProfile, PatientProfile & PatientDoctor mapping
-    │   │   ├── exercise.py   # Exercise catalogue & JSON engine configuration
-    │   │   ├── plan.py       # RehabilitationPlan & PlanExercise prescriptions
-    │   │   ├── session.py    # ExerciseSession, ExerciseMetric & ProgressRecord
-    │   │   └── mixins.py     # Common Timestamp mixin (created_at, updated_at)
-    │   ├── schemas/          # Pydantic schemas for request/response validation
-    │   │   ├── auth.py       # Login & Registration payload definitions
-    │   │   └── user.py       # User response schemas
-    │   └── services/         # Business logic layer
-    │       └── auth_service.py # Authentication & User registration workflows
-    ├── .env.example          # Sample environment configuration file
-    ├── alembic.ini           # Alembic migration configuration
-    ├── requirements.txt      # Core backend dependencies
-    ├── requirements-cv.txt   # Computer vision & pose tracking dependencies
-    └── requirements-dev.txt  # Testing & developer tooling dependencies
+Physical Exercises (Patient Webcam)
+              │
+              ▼
+Client-Side MediaPipe Engine (Angles, Velocities, Calibration)
+              │
+              ▼
+WebSocket Telemetry (/api/ws/exercise-session/{id})
+              │
+              ▼
+Deterministic Scoring & Recovery Engine (PostgreSQL DB)
+              │
+              ▼
+[Doctor Clinical Intelligence & Patient Portals]
 ```
 
 ---
 
-## 🗄️ Core Data Models & Schema
+## 🚀 Quickstart & Local Setup
 
-1. **User & Roles (`users`)**: Central account system supporting `patient`, `doctor`, and `admin` roles with encrypted password hashes.
-2. **Patient & Doctor Profiles (`patient_profiles`, `doctor_profiles`, `patient_doctors`)**: 1:1 user profile extensions and many-to-many relationship mapping care teams.
-3. **Exercise Catalogue (`exercises`)**: Stores exercise definitions and dynamic JSON configurations for the CV engine (`default_engine_config`).
-4. **Rehabilitation Plans (`rehabilitation_plans`, `plan_exercises`)**: Prescription structures linking patients with doctors, sets, reps, and target Range of Motion (ROM).
-5. **Exercise Sessions & Metrics (`exercise_sessions`, `exercise_metrics`, `progress_records`)**: Track real-time patient session execution, rep-by-rep ROM angles, form score metrics, form issue logs, and longitudinal patient progress.
+### Prerequisites
+- **Node.js**: v18+ & npm
+- **Python**: 3.11+
+- **Docker & Docker Compose** (Optional, for full containerized stack)
 
 ---
 
-## 🚀 Quick Start & Setup Guide
+### Option A: Running via Docker Compose (Recommended for Judges / Evaluators)
 
-### 1. Prerequisites
-- **Python**: `3.11` or `3.12` recommended
-- **PostgreSQL**: Local instance or Docker container
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Nik-coder-10/Rehab-Ai.git
+   cd Rehab-Ai
+   ```
 
-### 2. Environment Setup
+2. Start the full multi-tier containerized stack (PostgreSQL + FastAPI + Vite Nginx frontend):
+   ```bash
+   docker-compose up --build -d
+   ```
 
-Clone the repository and navigate into the directory:
+3. Access the portals:
+   - **Frontend Application**: [http://localhost:3000](http://localhost:3000)
+   - **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+   - **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+
+---
+
+### Option B: Local Development Setup
+
+#### 1. Backend Setup
 ```bash
-git clone https://github.com/Nik-coder-10/Rehab-Ai.git
-cd Rehab-Ai/backend
-```
+cd backend
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
 
-Create and activate a virtual environment:
-```bash
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-
-# Linux / macOS
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-Install the core backend dependencies:
-```bash
 pip install -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-*(Optional)* Install Computer Vision dependencies for pose estimation work:
+#### 2. Frontend Setup
 ```bash
-pip install -r requirements-cv.txt
+cd frontend
+npm install
+npm run dev
 ```
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### 4. Configuration
+---
 
-Copy the example environment file and update your variables:
+## 🧪 Running Automated Test Suites
+
+### Backend Integration & Security Tests (45 Tests)
 ```bash
-cp .env.example .env
+cd backend
+python -m pytest tests/ -v
 ```
 
-Update your `.env` settings:
-```env
-REHABAI_ENVIRONMENT=development
-REHABAI_DEBUG=true
-REHABAI_LOG_LEVEL=INFO
-REHABAI_SECRET_KEY=your-super-secret-key-here
-REHABAI_DATABASE_URL=postgresql+psycopg://username:password@localhost:5432/rehabai
-REHABAI_ACCESS_TOKEN_EXPIRE_MINUTES=1440
-REHABAI_CORS_ORIGINS=["http://localhost:5173"]
+### Frontend Biomechanical & Calibration Tests (38 Tests)
+```bash
+cd frontend
+npx vitest run
+```
+
+### Frontend Production Build Verification
+```bash
+cd frontend
+npm run build
 ```
 
 ---
 
-## 🗃️ Database Migrations
+## 🔒 Security, Privacy & RBAC
 
-Apply database migrations using Alembic:
-```bash
-alembic upgrade head
-```
-
-To create a new migration after model changes:
-```bash
-alembic revision --autogenerate -m "describe_migration_changes"
-```
+- **Role-Based Access Control (RBAC)**: Distinct permissions for `PATIENT` and `DOCTOR` users.
+- **IDOR Protection**: Verified ownership checks on workout sessions, patient charts, and care protocols.
+- **Security Headers**: Enforces `nosniff`, `DENY` frame ancestors, CSP, and strict CORS.
+- **AI Safety**: Zero-hallucination architecture; the AI layer acts as an interpreter of verified database metrics rather than the source of truth.
 
 ---
 
-## 📄 License
+## 👥 Default Demo Credentials
 
-This project is licensed under the [MIT License](LICENSE).
+- **Doctor Account**:
+  - Email: `doctor@rehabai.com`
+  - Password: `Password123!`
+- **Patient Account**:
+  - Email: `patient@rehabai.com`
+  - Password: `Password123!`

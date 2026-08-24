@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: rehabai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rehabai
+      POSTGRES_USER: rehabai
+      POSTGRES_PASSWORD: rehabai_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rehabai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rehabai-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      REHABAI_ENVIRONMENT: production
+      REHABAI_DEBUG: "false"
+      REHABAI_LOG_LEVEL: INFO
+      REHABAI_SECRET_KEY: ${REHABAI_SECRET_KEY:-default_secure_secret_key_rehabai_2026}
+      REHABAI_DATABASE_URL: postgresql+psycopg://rehabai:rehabai_password@db:5432/rehabai
+      REHABAI_CORS_ORIGINS: '["http://localhost:3000", "http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rehabai-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:

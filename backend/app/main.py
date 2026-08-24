@@ -60,5 +60,23 @@ def health_check():
     return {"status": "ok", "service": "RehabAI API", "environment": settings.environment}
 
 
+@app.get("/health/db", tags=["system"])
+def db_health_check():
+    try:
+        from app.db.session import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            return {"status": "healthy", "database": "connected"}
+        finally:
+            db.close()
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unhealthy", "database": "disconnected", "detail": str(e)},
+        )
+
+
 # Mount all API routes under /api
 app.include_router(api_router)
