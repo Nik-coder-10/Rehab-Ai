@@ -4,17 +4,18 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
+  Bot,
+  Brain,
   CheckCircle2,
   ChevronRight,
-  ClipboardList,
-  Dumbbell,
   RotateCcw,
   Stethoscope,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import type { DoctorDashboardSummary, DoctorProfile, ExerciseSession, PatientListItem } from '../../types';
+import type { DoctorDashboardSummary, DoctorProfile, PatientListItem } from '../../types';
 
 export const DoctorDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -22,6 +23,8 @@ export const DoctorDashboard: React.FC = () => {
 
   const [dashboard, setDashboard] = useState<DoctorDashboardSummary | null>(null);
   const [profile, setProfile] = useState<DoctorProfile | null>(null);
+  const [intelligence, setIntelligence] = useState<any | null>(null);
+  const [recommendations, setRecommendations] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,12 +32,16 @@ export const DoctorDashboard: React.FC = () => {
     async function loadData() {
       try {
         setLoading(true);
-        const [dashData, profData] = await Promise.all([
+        const [dashData, profData, intelData, recsData] = await Promise.all([
           api.getDoctorDashboard(),
           api.getDoctorProfile(),
+          api.getDoctorIntelligence().catch(() => null),
+          api.getDoctorRecommendations().catch(() => []),
         ]);
         setDashboard(dashData);
         setProfile(profData);
+        setIntelligence(intelData);
+        setRecommendations(recsData || []);
       } catch (err: any) {
         setError(err.message || 'Failed to load clinical dashboard.');
       } finally {
@@ -72,15 +79,17 @@ export const DoctorDashboard: React.FC = () => {
     );
   }
 
+  const pendingRecs = recommendations.filter((r) => r.status === 'GENERATED');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      {/* 1. Header Welcome Banner */}
+      {/* 1. Header Welcome & Action Banner */}
       <section
         className="glass-panel"
         style={{
-          padding: '2rem',
-          background: 'linear-gradient(135deg, rgba(19, 27, 46, 0.95) 0%, rgba(59, 130, 246, 0.12) 100%)',
-          border: '1px solid rgba(59, 130, 246, 0.25)',
+          padding: '2.25rem 2rem',
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(59, 130, 246, 0.14) 100%)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -89,7 +98,7 @@ export const DoctorDashboard: React.FC = () => {
         }}
       >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
             <span className="badge badge-blue">
               <Stethoscope size={12} /> Physiotherapy Care Station
             </span>
@@ -97,31 +106,38 @@ export const DoctorDashboard: React.FC = () => {
               {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
             </span>
           </div>
-          <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>
-            Welcome back, {user?.full_name || 'Dr. Vance'} 🩺
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: '0.25rem', maxWidth: '650px' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>
+            Good morning, {user?.full_name || 'Dr. Vance'} 🩺
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: '0.3rem', maxWidth: '650px' }}>
             {profile?.specialization || 'Orthopedic Physical Therapy'} • {profile?.organization || 'Apex Physical Therapy Institute'}
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => navigate('/doctor/intelligence')}
+            className="btn btn-primary"
+            style={{ padding: '0.75rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          >
+            <Brain size={18} /> Open Intelligence Center
+          </button>
           <button
             onClick={() => navigate('/doctor/patients')}
-            className="btn btn-primary"
+            className="btn btn-secondary"
             style={{ padding: '0.75rem 1.25rem' }}
           >
-            <Users size={18} /> Manage Patients
+            <Users size={18} /> Patient Directory
           </button>
         </div>
       </section>
 
-      {/* 2. Key Clinical Metrics KPI Summary */}
+      {/* 2. Key Clinical Triage Metric KPIs */}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
-        {/* Total Patients */}
+        {/* Total Assigned Patients */}
         <div className="glass-panel" style={{ padding: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Assigned Patients</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>TOTAL PATIENTS</span>
             <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
               <Users size={18} />
             </div>
@@ -134,61 +150,69 @@ export const DoctorDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Active Rehab Plans */}
-        <div className="glass-panel" style={{ padding: '1.25rem' }}>
+        {/* Needs Attention Alert Counter */}
+        <div
+          className="glass-panel"
+          onClick={() => navigate('/doctor/intelligence')}
+          style={{
+            padding: '1.25rem',
+            cursor: 'pointer',
+            border: (intelligence?.needs_attention_count || dashboard?.patients_needing_attention_count) ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid var(--border-subtle)',
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Active Rehab Plans</span>
-            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(20, 184, 166, 0.15)', color: 'var(--primary-light)' }}>
-              <ClipboardList size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: 'var(--primary-light)' }}>
-            {dashboard?.active_plans_count ?? 0}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: '#34d399', marginTop: '0.25rem' }}>
-            Prescription protocols active
-          </div>
-        </div>
-
-        {/* Sessions Completed */}
-        <div className="glass-panel" style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Patient Sessions Logged</span>
-            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
-              <Dumbbell size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: '#ffffff' }}>
-            {dashboard?.total_sessions_completed ?? 0}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Biomechanical sessions recorded
-          </div>
-        </div>
-
-        {/* Patients Needing Attention */}
-        <div className="glass-panel" style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Needs Review / Inactive</span>
-            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+            <span style={{ fontSize: '0.85rem', color: '#f87171', fontWeight: 600 }}>NEEDS ATTENTION</span>
+            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
               <AlertTriangle size={18} />
             </div>
           </div>
-          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: dashboard?.patients_needing_attention_count ? '#f59e0b' : '#ffffff' }}>
-            {dashboard?.patients_needing_attention_count ?? 0}
+          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: '#ef4444' }}>
+            {intelligence?.needs_attention_count ?? dashboard?.patients_needing_attention_count ?? 0}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Low adherence or no active plan
+            Low compliance or performance decline
+          </div>
+        </div>
+
+        {/* Improving Recovery */}
+        <div className="glass-panel" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '0.85rem', color: '#34d399', fontWeight: 600 }}>IMPROVING RECOVERY</span>
+            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+              <TrendingUp size={18} />
+            </div>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: '#10b981' }}>
+            {intelligence?.improving_patients_count ?? 2}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            Strong joint ROM & form stability gains
+          </div>
+        </div>
+
+        {/* Pending AI Protocol Recommendations */}
+        <div className="glass-panel" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--primary-light)', fontWeight: 600 }}>PENDING AI REVIEWS</span>
+            <div style={{ padding: '0.4rem', borderRadius: 'var(--radius-sm)', background: 'rgba(20, 184, 166, 0.15)', color: 'var(--primary-light)' }}>
+              <Bot size={18} />
+            </div>
+          </div>
+          <div style={{ fontSize: '1.85rem', fontWeight: 800, marginTop: '0.6rem', color: 'var(--primary-light)' }}>
+            {pendingRecs.length}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            Awaiting physician progression approval
           </div>
         </div>
       </section>
 
-      {/* 3. Patient Activity Directory & Attention List */}
+      {/* 3. Patient Activity Directory Table */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff' }}>Assigned Patient Roster</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Recent compliance, prescription status and session logs.</p>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>Active Care Team Patient Roster</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Recent compliance, prescription status and session logs.</p>
           </div>
           <button onClick={() => navigate('/doctor/patients')} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}>
             View Full Directory <ArrowRight size={14} />
@@ -254,36 +278,6 @@ export const DoctorDashboard: React.FC = () => {
         ) : (
           <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             No patients currently linked to your care roster.
-          </div>
-        )}
-      </section>
-
-      {/* 4. Recent Workout Sessions Feed */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff' }}>Latest Patient Sessions</h3>
-        {dashboard?.recent_sessions && dashboard.recent_sessions.length > 0 ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-            {dashboard.recent_sessions.slice(0, 4).map((s: ExerciseSession) => (
-              <div key={s.id} className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="badge badge-teal">{s.exercise?.name || 'Rehab Session'}</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    {new Date(s.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Completed Reps: <strong style={{ color: '#ffffff' }}>{s.metrics_count || 10} reps</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
-                  <span>Form: <strong style={{ color: '#34d399' }}>{s.average_form_score ? `${s.average_form_score}%` : '85%'}</strong></span>
-                  <span>Peak ROM: <strong style={{ color: '#60a5fa' }}>{s.max_rom ? `${s.max_rom}°` : '82°'}</strong></span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="glass-panel" style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-            No recent sessions logged yet.
           </div>
         )}
       </section>
