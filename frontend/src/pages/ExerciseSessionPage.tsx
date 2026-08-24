@@ -1,115 +1,137 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Activity,
   ArrowLeft,
-  CheckCircle2,
-  ChevronRight,
   Pause,
   Play,
+  ShieldCheck,
   Sparkles,
   StopCircle,
 } from 'lucide-react';
 import { api } from '../services/api';
 import type { Exercise, ExerciseSession } from '../types';
 import { PoseDetector } from '../components/exercise/PoseDetector';
+import type { PoseDetectionFrame } from '../cv/landmarks';
+import { SquatAnalyzer } from '../cv/exercises/squat';
+import type { SquatFrameAnalysis, SquatPhase } from '../cv/exercises/squat';
 
 export const ExerciseSessionPage: React.FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>();
-  const [searchParams] = useSearchParams();
-  const planExerciseId = searchParams.get('plan_exercise_id');
-  const initialSessionId = searchParams.get('session_id');
-  const mode = searchParams.get('mode'); // 'result' or undefined (active)
-
   const navigate = useNavigate();
 
   const [exercise, setExercise] = useState<Exercise | null>(null);
   const [session, setSession] = useState<ExerciseSession | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [isSessionActive, setIsSessionActive] = useState<boolean>(mode !== 'result');
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [sessionCompleted, setSessionCompleted] = useState<boolean>(mode === 'result');
+  const [sessionActive, setSessionActive] = useState<boolean>(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [savingSession, setSavingSession] = useState<boolean>(false);
 
-  // Exercise Session Live State
-  const [targetReps] = useState<number>(10);
+  // Biomechanical Squat Analyzer Instance
+  const squatAnalyzerRef = useRef<SquatAnalyzer>(new SquatAnalyzer());
+  const [squatAnalysis, setSquatAnalysis] = useState<SquatFrameAnalysis | null>(null);
   const [currentReps, setCurrentReps] = useState<number>(0);
-  const [timerSeconds, setTimerSeconds] = useState<number>(0);
-  const [liveFormScore, setLiveFormScore] = useState<number>(88);
-  const [liveRomAngle, setLiveRomAngle] = useState<number>(76);
-  const [feedbackMessage, setFeedbackMessage] = useState<string>('Ready. Position yourself in camera frame.');
+  const [targetReps, setTargetReps] = useState<number>(10);
+  const [formScore, setFormScore] = useState<number>(100);
+  const [peakRom, setPeakRom] = useState<number>(0);
+  const [currentPhase, setCurrentPhase] = useState<SquatPhase>('STANDING');
+  const [feedbackMessage, setFeedbackMessage] = useState<string>(
+    'Stand 2 meters in front of the camera with your whole body in view.'
+  );
 
-  // Initialize Session
   useEffect(() => {
-    async function initSession() {
+    async function loadData() {
       if (!exerciseId) return;
       try {
         setLoading(true);
-        const exData = await api.getExerciseDetail(exerciseId);
-        setExercise(exData);
+        const ex = await api.getExerciseDetail(exerciseId);
+        setExercise(ex);
 
-        if (initialSessionId) {
-          const sessData = await api.getSessionDetail(initialSessionId);
-          setSession(sessData);
-          if (mode === 'result') {
-            setSessionCompleted(true);
-            setIsSessionActive(false);
+        // Fetch prescription from patient plan if available
+        try {
+          const plan = await api.getPatientPlan();
+          if (plan) {
+            const planEx = plan.exercises.find((p) => p.exercise_id === exerciseId);
+            if (planEx) {
+              setTargetReps(planEx.target_reps);
+            }
           }
-        } else {
-          // Create new backend session
-          const newSess = await api.createSession(exerciseId, planExerciseId);
-          setSession(newSess);
+        } catch {
+          // Fallback to default
         }
+
+        // Initialize session on backend
+        const sess = await api.createSession(exerciseId);
+        setSession(sess);
+        setSessionActive(true);
       } catch (err) {
-        console.error('Failed to init session:', err);
+        console.error(err);
       } finally {
         setLoading(false);
       }
     }
-    initSession();
-  }, [exerciseId, initialSessionId, planExerciseId, mode]);
+    loadData();
+  }, [exerciseId]);
 
-  // Live Timer Hook
+  // Session elapsed timer
   useEffect(() => {
-    let interval: any = null;
-    if (isSessionActive && !isPaused && !sessionCompleted) {
+    let interval: any;
+    if (sessionActive) {
       interval = setInterval(() => {
-        setTimerSeconds((prev) => prev + 1);
+        setElapsedSeconds((prev) => prev + 1);
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isSessionActive, isPaused, sessionCompleted]);
+  }, [sessionActive]);
 
-  // Simulate Repetition Increment for developer / test interaction
-  const handleSimulateRep = () => {
-    if (currentReps + 1 >= targetReps) {
-      setCurrentReps(targetReps);
-      setLiveRomAngle(84);
-      setLiveFormScore(92);
-      setFeedbackMessage('Target completed! Perfect terminal joint extension.');
-      handleEndSession(targetReps);
-    } else {
-      const next = currentReps + 1;
-      setCurrentReps(next);
-      setLiveRomAngle(75 + (next % 4) * 3);
-      setLiveFormScore(86 + (next % 3) * 2);
-      setFeedbackMessage('Good extension. Maintain 2-second hold at peak.');
+  // Handle live pose estimation frame & feed to SquatAnalyzer
+  const handlePoseFrame = (frame: PoseDetectionFrame) => {
+    if (!sessionActive || frame.landmarks.length === 0) return;
+
+    const analysis = squatAnalyzerRef.current.processFrame(frame.landmarks, frame.timestamp);
+    setSquatAnalysis(analysis);
+    setCurrentPhase(analysis.phase);
+    setCurrentReps(analysis.repCount);
+    setFeedbackMessage(analysis.activeFeedback);
+    setPeakRom(Math.round(analysis.currentRom));
+
+    if (analysis.completedReps.length > 0) {
+      const avgScore = Math.round(
+        analysis.completedReps.reduce((acc, r) => acc + r.formScore, 0) / analysis.completedReps.length
+      );
+      setFormScore(avgScore);
     }
   };
 
-  const handleEndSession = async (repsToSubmit?: number) => {
-    if (!session) return;
-    try {
-      const reps = repsToSubmit !== undefined ? repsToSubmit : currentReps;
-      const updated = await api.finishSession(session.id, {
-        status: 'completed',
-        completed_reps: reps,
-      });
-      setSession(updated);
-      setSessionCompleted(true);
-      setIsSessionActive(false);
-    } catch (err) {
-      console.error('Failed to finish session:', err);
+  // End and persist session with real biomechanical data to backend
+  const handleEndSession = async () => {
+    if (!session) {
+      navigate('/patient');
+      return;
     }
+    setSavingSession(true);
+    try {
+      await api.finishSession(session.id, {
+        status: 'completed',
+        completed_reps: currentReps,
+      });
+      navigate(`/patient`);
+    } catch (err) {
+      console.error(err);
+      navigate('/patient');
+    } finally {
+      setSavingSession(false);
+    }
+  };
+
+  const handleSimulateRep = () => {
+    // Manual step simulation for testing fallback
+    squatAnalyzerRef.current.processAngle(95);
+    setTimeout(() => {
+      const finish = squatAnalyzerRef.current.processAngle(175);
+      setCurrentReps(finish.repCount);
+      setCurrentPhase(finish.phase);
+      setFeedbackMessage(finish.activeFeedback);
+    }, 400);
   };
 
   const formatTime = (secs: number) => {
@@ -118,181 +140,121 @@ export const ExerciseSessionPage: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const getPhaseBadge = (phase: SquatPhase) => {
+    switch (phase) {
+      case 'STANDING':
+        return <span className="badge badge-teal">STANDING</span>;
+      case 'DESCENDING':
+        return <span className="badge badge-blue">DESCENDING</span>;
+      case 'BOTTOM':
+        return <span className="badge badge-green">BOTTOM DEPTH</span>;
+      case 'ASCENDING':
+        return <span className="badge badge-amber">ASCENDING</span>;
+    }
+  };
+
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
-        <div className="skeleton" style={{ width: '80px', height: '80px', borderRadius: '50%' }} />
-        <p style={{ color: 'var(--text-secondary)' }}>Initializing Exercise Session...</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div className="skeleton" style={{ height: '70px', width: '100%' }} />
+        <div className="skeleton" style={{ height: '480px', width: '100%' }} />
       </div>
     );
   }
 
-  // --- RESULT VIEW (Session Complete) ---
-  if (sessionCompleted) {
-    return (
-      <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        <div
-          className="glass-panel"
-          style={{
-            padding: '2.5rem',
-            textAlign: 'center',
-            background: 'linear-gradient(135deg, rgba(19, 27, 46, 0.95) 0%, rgba(20, 184, 166, 0.12) 100%)',
-            border: '1px solid rgba(20, 184, 166, 0.3)',
-          }}
-        >
-          <div
-            style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(20, 184, 166, 0.2)',
-              border: '1px solid var(--border-glow)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 1.25rem auto',
-            }}
-          >
-            <CheckCircle2 size={36} color="var(--primary-light)" />
-          </div>
-
-          <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ffffff' }}>Rehabilitation Session Completed!</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: '0.25rem' }}>
-            {exercise?.name} summary recorded and synced with your care team.
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginTop: '2rem' }}>
-            <div className="glass-panel" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>REPETITIONS</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
-                {currentReps || session?.metrics_count || 10} / {targetReps}
-              </div>
-            </div>
-
-            <div className="glass-panel" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>DURATION</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '0.25rem' }}>
-                {timerSeconds > 0 ? formatTime(timerSeconds) : '02:45'}
-              </div>
-            </div>
-
-            <div className="glass-panel" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>AVERAGE FORM</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--primary-light)', marginTop: '0.25rem' }}>
-                {liveFormScore}%
-              </div>
-            </div>
-
-            <div className="glass-panel" style={{ padding: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>PEAK ROM</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#34d399', marginTop: '0.25rem' }}>
-                {liveRomAngle}°
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '2.25rem', flexWrap: 'wrap' }}>
-            <button onClick={() => navigate('/patient/progress')} className="btn btn-secondary">
-              <Activity size={16} /> View Longitudinal Progress
-            </button>
-            <button onClick={() => navigate('/patient')} className="btn btn-primary">
-              Return to Dashboard <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // --- ACTIVE SESSION INTERFACE (Camera / CV Pipeline Hook) ---
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '1200px', margin: '0 auto' }}>
-      {/* Top Session Status Bar */}
-      <div
-        className="glass-panel"
-        style={{
-          padding: '1rem 1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Session Top Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button
             onClick={() => navigate('/patient/exercises')}
             className="btn btn-secondary"
-            style={{ padding: '0.4rem', borderRadius: '50%' }}
+            style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft size={16} /> Exit
           </button>
           <div>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff' }}>{exercise?.name}</h2>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <span className="badge badge-teal">Live Session</span>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{exercise?.category}</span>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff' }}>
+              {exercise?.name || 'Rehabilitation Session'}
+            </h2>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.2rem' }}>
+              <span className="badge badge-teal">{exercise?.category}</span>
+              {getPhaseBadge(currentPhase)}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>SESSION TIME</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', fontFamily: 'monospace' }}>
-              {formatTime(timerSeconds)}
-            </div>
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              borderRadius: 'var(--radius-md)',
+              fontSize: '1.1rem',
+              fontWeight: 700,
+              fontFamily: 'monospace',
+              color: '#ffffff',
+            }}
+          >
+            {formatTime(elapsedSeconds)}
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button
-              onClick={() => setIsPaused(!isPaused)}
-              className="btn btn-secondary"
-              style={{ padding: '0.5rem 0.9rem' }}
-            >
-              {isPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} />}
-              {isPaused ? 'Resume' : 'Pause'}
-            </button>
-            <button
-              onClick={() => handleEndSession()}
-              className="btn btn-danger"
-              style={{ padding: '0.5rem 0.9rem' }}
-            >
-              <StopCircle size={16} /> End Session
-            </button>
-          </div>
+          <button
+            onClick={() => setSessionActive(!sessionActive)}
+            className="btn btn-secondary"
+            style={{ padding: '0.55rem 0.9rem' }}
+          >
+            {sessionActive ? <Pause size={18} /> : <Play size={18} />}
+          </button>
+
+          <button
+            onClick={handleEndSession}
+            disabled={savingSession}
+            className="btn btn-danger"
+            style={{ padding: '0.55rem 1.25rem' }}
+          >
+            <StopCircle size={18} /> {savingSession ? 'Saving Session...' : 'Finish Workout'}
+          </button>
         </div>
       </div>
 
-      {/* Main Studio Viewport: Camera / Overlay Grid */}
+      {/* Main Studio Viewport: Camera / Squat Overlay Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '1.5rem' }} className="session-grid">
         {/* Left: Real Camera Feed & Pose Overlay Area */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <PoseDetector
-            onPoseFrame={(frame) => {
-              if (frame.landmarks.length > 0) {
-                // If person is detected and tracking
-                if (frame.quality === 'READY') {
-                  setFeedbackMessage('Optimal form detected. Ready to track repetitions.');
-                } else if (frame.quality === 'PARTIAL_BODY') {
-                  setFeedbackMessage('Step back 2 meters so your full body & joints are visible.');
-                } else if (frame.quality === 'POOR_VISIBILITY') {
-                  setFeedbackMessage('Lighting is low. Please ensure clear joint illumination.');
-                }
-              } else {
-                setFeedbackMessage('Position yourself in front of the camera.');
-              }
-            }}
+            onPoseFrame={handlePoseFrame}
             showSkeleton={true}
             showAngles={true}
           />
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(20, 184, 166, 0.08)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(20, 184, 166, 0.2)' }}>
-            <span style={{ fontSize: '0.85rem', color: '#ffffff' }}>{feedbackMessage}</span>
+          {/* Form Feedback & Coaching Banner */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: 'rgba(20, 184, 166, 0.08)',
+              padding: '0.85rem 1.25rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(20, 184, 166, 0.2)',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <ShieldCheck size={18} color="var(--primary-light)" />
+              <span style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 500 }}>
+                {feedbackMessage}
+              </span>
+            </div>
+
             <button
               onClick={handleSimulateRep}
               className="btn btn-secondary"
-              style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
+              style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
             >
               <Sparkles size={13} color="var(--primary-light)" /> Simulate Rep ({currentReps}/{targetReps})
             </button>
@@ -301,26 +263,38 @@ export const ExerciseSessionPage: React.FC = () => {
 
         {/* Right: Rep Counter & Session Live Metrics Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Rep Counter */}
+          {/* Reps Goal Tile */}
           <div
-            id="RepCounter"
             className="glass-panel"
             style={{
               padding: '1.5rem',
               textAlign: 'center',
-              background: 'linear-gradient(135deg, rgba(23, 33, 56, 0.9) 0%, rgba(20, 184, 166, 0.1) 100%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-              Target Repetitions
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+              REPETITIONS COMPLETED
+            </span>
+            <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#ffffff', lineHeight: 1.1, margin: '0.5rem 0' }}>
+              {currentReps}
+              <span style={{ fontSize: '1.8rem', color: 'var(--text-muted)', fontWeight: 400 }}>/{targetReps}</span>
             </div>
-            <div style={{ fontSize: '3.5rem', fontWeight: 800, color: '#ffffff', lineHeight: 1.1, margin: '0.5rem 0' }}>
-              {currentReps} <span style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>/ {targetReps}</span>
-            </div>
-            <div style={{ width: '100%', height: '8px', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: '100%',
+                height: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '4px',
+                overflow: 'hidden',
+                marginTop: '0.5rem',
+              }}
+            >
               <div
                 style={{
-                  width: `${(currentReps / targetReps) * 100}%`,
+                  width: `${Math.min(100, (currentReps / targetReps) * 100)}%`,
                   height: '100%',
                   backgroundColor: 'var(--primary-light)',
                   transition: 'width 0.3s ease',
@@ -329,41 +303,38 @@ export const ExerciseSessionPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Session Metrics Hook */}
-          <div id="SessionMetrics" className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ffffff' }}>Joint & Form Telemetry</h4>
-
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Instantaneous Form Score</span>
-                <strong style={{ color: 'var(--primary-light)' }}>{liveFormScore}%</strong>
-              </div>
-              <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px' }}>
-                <div style={{ width: `${liveFormScore}%`, height: '100%', backgroundColor: '#10b981', borderRadius: '3px' }} />
-              </div>
+          {/* Form Score Tile */}
+          <div className="glass-panel" style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>FORM ACCURACY</span>
+              <span className="badge badge-green">{formScore}%</span>
             </div>
-
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Current Joint Angle (ROM)</span>
-                <strong style={{ color: '#60a5fa' }}>{liveRomAngle}°</strong>
-              </div>
-              <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px' }}>
-                <div style={{ width: `${(liveRomAngle / 90) * 100}%`, height: '100%', backgroundColor: '#3b82f6', borderRadius: '3px' }} />
-              </div>
+            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ffffff', marginTop: '0.4rem' }}>
+              {formScore >= 80 ? 'Optimal Technique' : 'Good Focus'}
             </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+              Depth: 35% | Tempo: 25% | Torso: 20% | Alignment: 20%
+            </p>
           </div>
 
-          {/* Exercise Instructions Quick Reference */}
-          <div className="glass-panel" style={{ padding: '1.25rem', fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
-            <h5 style={{ fontWeight: 700, color: '#ffffff', marginBottom: '0.4rem' }}>Form Cue</h5>
-            <p>{exercise?.instructions?.split('\n')[0] || 'Maintain posture and move with steady cadence.'}</p>
+          {/* Peak ROM Tile */}
+          <div className="glass-panel" style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>MEASURED ROM</span>
+              <span className="badge badge-blue">{peakRom}°</span>
+            </div>
+            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#60a5fa', marginTop: '0.4rem' }}>
+              {peakRom >= 80 ? 'Full Depth' : 'Working ROM'}
+            </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+              Vertex knee angle: {squatAnalysis ? `${squatAnalysis.currentKneeAngle}°` : '--'}
+            </p>
           </div>
         </div>
       </div>
 
       <style>{`
-        @media (max-width: 860px) {
+        @media (max-width: 850px) {
           .session-grid {
             grid-template-columns: 1fr !important;
           }

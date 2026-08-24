@@ -149,6 +149,15 @@ export const api = {
     return handleResponse<ExerciseSession>(res);
   },
 
+  updateSession: async (sessionId: string, data: Partial<ExerciseSession>): Promise<ExerciseSession> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<ExerciseSession>(res);
+  },
+
   // --- Doctor Management APIs ---
   getDoctorProfile: async (): Promise<DoctorProfile> => {
     const res = await fetch(`${API_BASE}/doctor/profile`, {
