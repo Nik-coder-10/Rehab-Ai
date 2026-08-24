@@ -82,3 +82,23 @@ def get_progress(
 ) -> ProgressSummaryRead:
     _, profile = patient_auth
     return get_patient_progress_summary(db, profile.id)
+
+
+@router.get("/recommendations")
+def get_patient_recommendations(
+    patient_auth: Annotated[tuple[User, PatientProfile], Depends(get_current_patient)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Evaluate or retrieve current adaptive clinical recommendation for patient."""
+    from app.services.recommendation_service import evaluate_and_generate_patient_recommendation
+    _, profile = patient_auth
+    rec = evaluate_and_generate_patient_recommendation(db, profile.id)
+    return {
+        "id": str(rec.id),
+        "recommendation_type": rec.recommendation_type.value,
+        "status": rec.status.value,
+        "title": rec.title,
+        "patient_message": rec.patient_message,
+        "confidence_score": rec.confidence_score,
+        "created_at": rec.created_at.isoformat() if rec.created_at else None,
+    }

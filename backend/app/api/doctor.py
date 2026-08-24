@@ -173,22 +173,55 @@ def get_all_exercises(
     return list_patient_exercises(db, user.id)
 
 
-@router.post("/exercises", response_model=ExerciseRead, status_code=status.HTTP_201_CREATED)
-def add_new_exercise(
-    data: ExerciseCreate,
+# --- Adaptive AI Recommendations Workflow ---
+@router.get("/recommendations")
+def get_recommendations(
     doctor_auth: Annotated[tuple[User, DoctorProfile], Depends(get_current_doctor)],
     db: Annotated[Session, Depends(get_db)],
-) -> ExerciseRead:
-    user, _ = doctor_auth
-    return create_exercise(db, user.id, data)
+) -> list[dict]:
+    from app.services.recommendation_service import list_doctor_recommendations
+    _, profile = doctor_auth
+    recs = list_doctor_recommendations(db, profile.id)
+    return [
+        {
+            "id": str(r.id),
+            "patient_profile_id": str(r.patient_profile_id),
+            "patient_name": r.patient.user.full_name if r.patient and r.patient.user else "Patient",
+            "plan_id": str(r.plan_id) if r.plan_id else None,
+            "exercise_name": r.exercise.name if r.exercise else "General Protocol",
+            "recommendation_type": r.recommendation_type.value,
+            "status": r.status.value,
+            "title": r.title,
+            "clinical_rationale": r.clinical_rationale,
+            "patient_message": r.patient_message,
+            "suggested_changes": r.suggested_changes,
+            "evidence_metrics": r.evidence_metrics,
+            "confidence_score": r.confidence_score,
+            "doctor_decision_note": r.doctor_decision_note,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in recs
+    ]
 
 
-@router.put("/exercises/{exercise_id}", response_model=ExerciseRead)
-def update_exercise_details(
-    exercise_id: uuid.UUID,
-    data: ExerciseUpdate,
+@router.post("/recommendations/{recommendation_id}/decision")
+def submit_recommendation_decision(
+    recommendation_id: uuid.UUID,
+    data: dict,  # {"decision": "APPROVED" | "REJECTED", "doctor_note": str}
     doctor_auth: Annotated[tuple[User, DoctorProfile], Depends(get_current_doctor)],
     db: Annotated[Session, Depends(get_db)],
-) -> ExerciseRead:
-    _, _ = doctor_auth
-    return update_exercise(db, exercise_id, data)
+) -> dict:
+    from app.services.recommendation_service import apply_recommendation_decision
+    _, profile = doctor_auth
+    rec = apply_recommendation_decision(
+        db=db,
+        doctor_profile_id=profile.id,
+        recommendation_id=recommendation_id,
+        decision=data.get("decision", "APPROVED"),
+        doctor_note=data.get("doctor_note"),
+    )
+    return {
+        "id": str(rec.id),
+        "status": rec.status.value,
+        "message": f"Recommendation successfully {rec.status.value.lower()}.",
+    }

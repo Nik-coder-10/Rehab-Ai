@@ -11,6 +11,12 @@ from app.models.session import (
     SessionStatus,
 )
 
+from app.models.recommendation import (
+    RehabilitationRecommendation,
+    RecommendationStatus,
+    RecommendationType,
+)
+
 __all__ = [
     "User",
     "UserRole",
@@ -26,4 +32,7 @@ __all__ = [
     "SessionStatus",
     "ExerciseMetric",
     "ProgressRecord",
+    "RehabilitationRecommendation",
+    "RecommendationType",
+    "RecommendationStatus",
 ]
