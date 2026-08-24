@@ -12,8 +12,8 @@ import { api } from '../services/api';
 import type { Exercise, ExerciseSession } from '../types';
 import { PoseDetector } from '../components/exercise/PoseDetector';
 import type { PoseDetectionFrame } from '../cv/landmarks';
-import { SquatAnalyzer } from '../cv/exercises/squat';
-import type { SquatFrameAnalysis, SquatPhase } from '../cv/exercises/squat';
+import { exerciseRegistry } from '../cv/exercises/registry';
+import type { IExerciseAnalyzer, ExerciseAnalysisResult } from '../cv/exercises/core/types';
 
 export const ExerciseSessionPage: React.FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>();
@@ -26,16 +26,16 @@ export const ExerciseSessionPage: React.FC = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [savingSession, setSavingSession] = useState<boolean>(false);
 
-  // Biomechanical Squat Analyzer Instance
-  const squatAnalyzerRef = useRef<SquatAnalyzer>(new SquatAnalyzer());
-  const [squatAnalysis, setSquatAnalysis] = useState<SquatFrameAnalysis | null>(null);
+  // Dynamic Biomechanical Analyzer Instance
+  const analyzerRef = useRef<IExerciseAnalyzer>(exerciseRegistry.get('squat'));
+  const [analysisResult, setAnalysisResult] = useState<ExerciseAnalysisResult | null>(null);
   const [currentReps, setCurrentReps] = useState<number>(0);
   const [targetReps, setTargetReps] = useState<number>(10);
   const [formScore, setFormScore] = useState<number>(100);
   const [peakRom, setPeakRom] = useState<number>(0);
-  const [currentPhase, setCurrentPhase] = useState<SquatPhase>('STANDING');
+  const [currentPhase, setCurrentPhase] = useState<string>('STARTING');
   const [feedbackMessage, setFeedbackMessage] = useState<string>(
-    'Stand 2 meters in front of the camera with your whole body in view.'
+    'Stand 2 meters in front of the camera with your target joint in view.'
   );
 
   useEffect(() => {
@@ -45,6 +45,10 @@ export const ExerciseSessionPage: React.FC = () => {
         setLoading(true);
         const ex = await api.getExerciseDetail(exerciseId);
         setExercise(ex);
+
+        // Dynamically instantiate the correct exercise analyzer from the registry
+        const analyzerInstance = exerciseRegistry.get(ex.code || ex.name);
+        analyzerRef.current = analyzerInstance;
 
         // Fetch prescription from patient plan if available
         try {
@@ -83,12 +87,12 @@ export const ExerciseSessionPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [sessionActive]);
 
-  // Handle live pose estimation frame & feed to SquatAnalyzer
+  // Handle live pose estimation frame & feed to active dynamic analyzer
   const handlePoseFrame = (frame: PoseDetectionFrame) => {
     if (!sessionActive || frame.landmarks.length === 0) return;
 
-    const analysis = squatAnalyzerRef.current.processFrame(frame.landmarks, frame.timestamp);
-    setSquatAnalysis(analysis);
+    const analysis = analyzerRef.current.processFrame(frame.landmarks, frame.timestamp);
+    setAnalysisResult(analysis);
     setCurrentPhase(analysis.phase);
     setCurrentReps(analysis.repCount);
     setFeedbackMessage(analysis.activeFeedback);
@@ -125,12 +129,14 @@ export const ExerciseSessionPage: React.FC = () => {
 
   const handleSimulateRep = () => {
     // Manual step simulation for testing fallback
-    squatAnalyzerRef.current.processAngle(95);
+    analyzerRef.current.processAngle?.(95);
     setTimeout(() => {
-      const finish = squatAnalyzerRef.current.processAngle(175);
-      setCurrentReps(finish.repCount);
-      setCurrentPhase(finish.phase);
-      setFeedbackMessage(finish.activeFeedback);
+      const finish = analyzerRef.current.processAngle?.(175);
+      if (finish) {
+        setCurrentReps(finish.repCount);
+        setCurrentPhase(finish.phase);
+        setFeedbackMessage(finish.activeFeedback);
+      }
     }, 400);
   };
 
@@ -140,16 +146,35 @@ export const ExerciseSessionPage: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getPhaseBadge = (phase: SquatPhase) => {
-    switch (phase) {
+  const getPhaseBadge = (phase: string) => {
+    switch (phase.toUpperCase()) {
+      case 'STARTING':
       case 'STANDING':
-        return <span className="badge badge-teal">STANDING</span>;
+      case 'SUPINE':
+      case 'FLEXED':
+      case 'EXTENSION':
+      case 'ADDUCTION':
+      case 'NEUTRAL':
+        return <span className="badge badge-teal">{phase}</span>;
       case 'DESCENDING':
-        return <span className="badge badge-blue">DESCENDING</span>;
+      case 'FLEXING':
+      case 'ABDUCTING':
+      case 'FLEXING_FORWARD':
+      case 'EXTENDING':
+      case 'RAISING':
+        return <span className="badge badge-blue">{phase}</span>;
       case 'BOTTOM':
-        return <span className="badge badge-green">BOTTOM DEPTH</span>;
+      case 'PEAK_CONTRACTION':
+      case 'PEAK_ELEVATION':
+      case 'OVERHEAD_PEAK':
+      case 'TERMINAL_EXTENSION':
+        return <span className="badge badge-green">PEAK ROM</span>;
       case 'ASCENDING':
-        return <span className="badge badge-amber">ASCENDING</span>;
+      case 'LOWERING':
+      case 'ADDUCTING':
+        return <span className="badge badge-amber">{phase}</span>;
+      default:
+        return <span className="badge badge-teal">{phase}</span>;
     }
   };
 
@@ -327,7 +352,7 @@ export const ExerciseSessionPage: React.FC = () => {
               {peakRom >= 80 ? 'Full Depth' : 'Working ROM'}
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Vertex knee angle: {squatAnalysis ? `${squatAnalysis.currentKneeAngle}°` : '--'}
+              Vertex angle: {analysisResult ? `${Math.round(analysisResult.currentAngle)}°` : '--'}
             </p>
           </div>
         </div>

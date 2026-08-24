@@ -19,7 +19,18 @@ import {
 } from './types';
 import { evaluateSquatForm } from './scoring';
 
-export class SquatAnalyzer {
+import type { ExerciseConfig, IExerciseAnalyzer } from '../core/types';
+
+export class SquatAnalyzer implements IExerciseAnalyzer {
+  public readonly config: ExerciseConfig = {
+    code: 'squat',
+    name: 'Bodyweight Squat',
+    targetJoints: ['RIGHT_KNEE', 'LEFT_KNEE', 'RIGHT_HIP', 'LEFT_HIP'],
+    primaryJoint: 'RIGHT_KNEE',
+    secondaryJoint: 'RIGHT_HIP',
+    thresholds: DEFAULT_SQUAT_THRESHOLDS as any,
+  };
+
   private thresholds: SquatThresholds;
   private kneeTracker: JointMovementTracker;
   private hipTracker: JointMovementTracker;
@@ -64,17 +75,27 @@ export class SquatAnalyzer {
 
     if (!isTrackingValid) {
       return {
+        exerciseCode: 'squat',
         phase: this.currentPhase,
+        repCount: this.repCount,
+        formScore: this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 100,
+        currentRom: this.kneeTracker.currentRom,
+        currentAngle: 0,
         currentKneeAngle: 0,
         currentHipAngle: 0,
-        currentRom: this.kneeTracker.currentRom,
         currentVelocity: 0,
-        repCount: this.repCount,
         currentRepScore: this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 0,
         activeFeedback: 'Ensure full body is visible in camera view.',
         formMetrics: this.getCurrentFormMetrics(),
         completedReps: this.completedReps,
         isTrackingValid: false,
+        metrics: {
+          primaryAngle: 0,
+          secondaryAngle: 0,
+          peakRom: this.kneeTracker.currentRom,
+          velocity: 0,
+          formScore: this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 100,
+        },
       };
     }
 
@@ -100,18 +121,30 @@ export class SquatAnalyzer {
     // 4. Advance Squat State Machine
     this.updateStateMachine(smoothedKnee, currentVelocity, timestampMs);
 
+    const avgScore = this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 100;
+
     return {
+      exerciseCode: 'squat',
       phase: this.currentPhase,
+      repCount: this.repCount,
+      formScore: avgScore,
+      currentRom: kneeMovement.rom,
+      currentAngle: smoothedKnee,
       currentKneeAngle: smoothedKnee,
       currentHipAngle: hipMovement.smoothedAngle,
-      currentRom: kneeMovement.rom,
       currentVelocity,
-      repCount: this.repCount,
       currentRepScore: this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 0,
       activeFeedback: this.activeFeedback,
       formMetrics: this.getCurrentFormMetrics(),
       completedReps: this.completedReps,
       isTrackingValid: true,
+      metrics: {
+        primaryAngle: smoothedKnee,
+        secondaryAngle: hipMovement.smoothedAngle,
+        peakRom: kneeMovement.rom,
+        velocity: currentVelocity,
+        formScore: avgScore,
+      },
     };
   }
 
@@ -121,17 +154,19 @@ export class SquatAnalyzer {
   public processAngle(
     kneeAngle: number,
     timestampMs: number = performance.now()
-  ): { phase: SquatPhase; repCount: number; repScore: number; activeFeedback: string } {
+  ): { phase: SquatPhase; repCount: number; repScore: number; formScore: number; activeFeedback: string } {
     const kneeMovement = this.kneeTracker.update(kneeAngle, timestampMs);
     const smoothedKnee = kneeMovement.smoothedAngle;
     const velocity = kneeMovement.velocity;
 
     this.updateStateMachine(smoothedKnee, velocity, timestampMs);
+    const score = this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 100;
 
     return {
       phase: this.currentPhase,
       repCount: this.repCount,
-      repScore: this.completedReps.length > 0 ? this.completedReps[this.completedReps.length - 1].formScore : 0,
+      repScore: score,
+      formScore: score,
       activeFeedback: this.activeFeedback,
     };
   }

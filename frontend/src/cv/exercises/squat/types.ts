@@ -50,15 +50,25 @@ export interface SquatRepRecord {
 }
 
 export interface SquatFrameAnalysis {
+  exerciseCode: string;
   phase: SquatPhase;
+  repCount: number;
+  formScore: number;
+  currentRom: number;
+  currentAngle: number;
   currentKneeAngle: number;
   currentHipAngle: number;
-  currentRom: number;
   currentVelocity: number;
-  repCount: number;
   currentRepScore: number;
   activeFeedback: string;
   formMetrics: SquatFormMetrics;
   completedReps: SquatRepRecord[];
   isTrackingValid: boolean;
+  metrics: {
+    primaryAngle: number;
+    secondaryAngle: number;
+    peakRom: number;
+    velocity: number;
+    formScore: number;
+  };
 }
