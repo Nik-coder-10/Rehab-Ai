@@ -14,6 +14,7 @@ import { PoseDetector } from '../components/exercise/PoseDetector';
 import type { PoseDetectionFrame } from '../cv/landmarks';
 import { exerciseRegistry } from '../cv/exercises/registry';
 import type { IExerciseAnalyzer, ExerciseAnalysisResult } from '../cv/exercises/core/types';
+import { ExerciseSessionWsClient, type WsConnectionStatus } from '../services/sessionWsClient';
 
 export const ExerciseSessionPage: React.FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>();
@@ -25,9 +26,13 @@ export const ExerciseSessionPage: React.FC = () => {
   const [sessionActive, setSessionActive] = useState<boolean>(false);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [savingSession, setSavingSession] = useState<boolean>(false);
+  const [wsStatus, setWsStatus] = useState<WsConnectionStatus>('CONNECTING');
 
   // Dynamic Biomechanical Analyzer Instance
   const analyzerRef = useRef<IExerciseAnalyzer>(exerciseRegistry.get('squat'));
+  const wsClientRef = useRef<ExerciseSessionWsClient | null>(null);
+  const lastProcessedRepCountRef = useRef<number>(0);
+
   const [analysisResult, setAnalysisResult] = useState<ExerciseAnalysisResult | null>(null);
   const [currentReps, setCurrentReps] = useState<number>(0);
   const [targetReps, setTargetReps] = useState<number>(10);
@@ -67,6 +72,16 @@ export const ExerciseSessionPage: React.FC = () => {
         const sess = await api.createSession(exerciseId);
         setSession(sess);
         setSessionActive(true);
+
+        // Establish WebSocket telemetry channel
+        const token = localStorage.getItem('token') || '';
+        const wsClient = new ExerciseSessionWsClient({
+          sessionId: sess.id,
+          token,
+          onStatusChange: (s) => setWsStatus(s),
+        });
+        wsClient.connect();
+        wsClientRef.current = wsClient;
       } catch (err) {
         console.error(err);
       } finally {
@@ -74,6 +89,10 @@ export const ExerciseSessionPage: React.FC = () => {
       }
     }
     loadData();
+
+    return () => {
+      wsClientRef.current?.disconnect();
+    };
   }, [exerciseId]);
 
   // Session elapsed timer
@@ -87,7 +106,7 @@ export const ExerciseSessionPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [sessionActive]);
 
-  // Handle live pose estimation frame & feed to active dynamic analyzer
+  // Handle live pose estimation frame & feed to active dynamic analyzer + WebSocket
   const handlePoseFrame = (frame: PoseDetectionFrame) => {
     if (!sessionActive || frame.landmarks.length === 0) return;
 
@@ -103,6 +122,41 @@ export const ExerciseSessionPage: React.FC = () => {
         analysis.completedReps.reduce((acc, r) => acc + r.formScore, 0) / analysis.completedReps.length
       );
       setFormScore(avgScore);
+
+      // Detect discrete rep completion to send over WebSocket
+      if (analysis.repCount > lastProcessedRepCountRef.current) {
+        const latestRep = analysis.completedReps[analysis.completedReps.length - 1];
+        wsClientRef.current?.sendRepCompleted({
+          rep_number: latestRep.repNumber,
+          form_score: latestRep.formScore,
+          peak_rom: latestRep.peakRom,
+          duration_seconds: latestRep.durationSeconds,
+          feedback_cues: latestRep.feedbackCues,
+        });
+        lastProcessedRepCountRef.current = analysis.repCount;
+      }
+    }
+
+    // Stream lightweight metrics heartbeat over WebSocket
+    wsClientRef.current?.sendMetrics({
+      current_angle: analysis.currentAngle,
+      current_rom: analysis.currentRom,
+      current_velocity: analysis.currentVelocity,
+      phase: analysis.phase,
+      current_score: formScore,
+      active_feedback: analysis.activeFeedback,
+      reps_completed: analysis.repCount,
+    });
+  };
+
+  // Toggle pause/resume
+  const handleTogglePause = () => {
+    if (sessionActive) {
+      wsClientRef.current?.pauseSession();
+      setSessionActive(false);
+    } else {
+      wsClientRef.current?.resumeSession();
+      setSessionActive(true);
     }
   };
 
@@ -114,6 +168,7 @@ export const ExerciseSessionPage: React.FC = () => {
     }
     setSavingSession(true);
     try {
+      wsClientRef.current?.endSession();
       await api.finishSession(session.id, {
         status: 'completed',
         completed_reps: currentReps,
@@ -212,6 +267,35 @@ export const ExerciseSessionPage: React.FC = () => {
 
         {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* Real-time Connection Status Indicator */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.35rem 0.65rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+            }}
+          >
+            <div
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor:
+                  wsStatus === 'CONNECTED'
+                    ? '#10b981'
+                    : wsStatus === 'RECONNECTING' || wsStatus === 'CONNECTING'
+                    ? '#f59e0b'
+                    : '#ef4444',
+              }}
+            />
+            <span style={{ color: 'var(--text-secondary)' }}>{wsStatus}</span>
+          </div>
+
           <div
             style={{
               padding: '0.5rem 1rem',
@@ -227,7 +311,7 @@ export const ExerciseSessionPage: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setSessionActive(!sessionActive)}
+            onClick={handleTogglePause}
             className="btn btn-secondary"
             style={{ padding: '0.55rem 0.9rem' }}
           >
